@@ -4,6 +4,7 @@ import pdb
 from bs4 import BeautifulSoup
 import re
 import shelve
+import HTMLParser
 
 logging.basicConfig()
 l = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class ScrapTfScraper(object):
   SCRAP_BASE_URL = "http://scrap.tf"
   PERSIST_TO_SHELVE = True
   SHELVE_NAME = "items.db"
+  STEAM_LOGIN_POST_URL = "https://steamcommunity.com/openid/login"
 
   regLvl = re.compile("Level: (?P<level>[0-9]*[0-9]*[0-9]+)")
   regCost = re.compile(".*Costs:? (?P<cost>.+)<br/>")
@@ -50,7 +52,7 @@ class ScrapTfScraper(object):
   def scrapeItems(self):
     pages = []
     l.info("looking for pages...")
-    r = self.session.get(self.SCRAP_BASE_URL + "/items")
+    r = self.session.get(self.SCRAP_BASE_URL + "/stranges")
 
     soup = BeautifulSoup(r.text)
     for n in soup.find_all(class_="bank-selector-box"):
@@ -87,15 +89,48 @@ class ScrapTfScraper(object):
         l.debug("adding to payload: %s -  %s" % (n["name"], n["value"]))
         payload[n["name"]] = n["value"]
 
-    r = self.session.post("https://steamcommunity.com/openid/login", data=payload)
+    r = self.session.post(self.STEAM_LOGIN_POST_URL, data=payload)
 
     if r.url.startswith(self.SCRAP_BASE_URL):
       l.info("LOGIN SUCCESS!")
     else:
-      l.error("LOGIN FAIL, url is not %s, but %s" % (SCRAP_BASE_URL, r.url))
+      l.error("LOGIN FAIL, url is not %s, but %s" % (self.SCRAP_BASE_URL, r.url))
       quit()
+
+class  TradeTfScraper(object):
+  TRADE_BASE_URL = "http://trade.tf/classifieds/search/Sell/Strange/%s/all/All/1"
+  session = requests.Session()
+
+  def getPrices(self, itemName):
+    itemName = itemName.replace("Strange ", "")
+    r = self.session.get(self.TRADE_BASE_URL % itemName)
+    l.debug("trade.tf status code: %i" % r.status_code)
+    writePage(r.text)
+    soup = BeautifulSoup(r.text)
+
+    table = soup.find(class_="price-summary")
+
+    if(table == None):
+      l.error("%s not found!" % itemName)
+      return {"tradetf": None, "web": None, "backpack": None}
+
+    tradetfPrice = table.find(class_="price-price")
+    webPrice = tradetfPrice.find_next(class_="price-price")
+    backpacktfPrice = webPrice.find_next(class_="price-price")
+
+    l.debug("%s: %s, %s, %s" % (itemName, tradetfPrice.text, webPrice.text, backpacktfPrice.text))
+    return {"tradetf": tradetfPrice.text, "web": webPrice.text, "backpack": backpacktfPrice.text}
 
 
 if __name__ == "__main__":
   a = ScrapTfScraper()
   a.dumpItems()
+  
+  #a = shelve.open("items.db")
+  #items = a["items"]
+  #a.close()
+
+  #b = TradeTfScraper()
+
+  #for k, v in items.iteritems():
+    #print "%s, %s" % (v["cost"], b.getPrices(k))
